@@ -128,6 +128,9 @@ export function createWeapon(camera, random) {
     flash: 0,
     kick: 0,
     bloom: 0,       // extra spread accumulated from firing
+    sinceShot: 10,
+    reloadDuration: 0,
+    feedback: 0,
     armor: 0,
   };
 
@@ -140,22 +143,34 @@ export function createWeapon(camera, random) {
     state.cooldown = 0;
     state.reloadLeft = 0;
     state.bloom = 0;
+    state.kick = 0;
+    state.flash = 0;
+    state.feedback = 0;
+    state.sinceShot = 10;
   }
 
   function step(dt) {
+    dt = Math.max(0, dt);
+    state.sinceShot += dt;
     state.cooldown = Math.max(0, state.cooldown - dt);
     state.flash = Math.max(0, state.flash - dt);
-    state.kick += (0 - state.kick) * Math.min(1, dt * 14);
-    state.bloom = Math.max(0, state.bloom - dt * 0.05);
+    state.kick *= Math.exp(-dt * 14);
+    // A short settling delay makes bursts tighter than sustained automatic fire.
+    if (state.sinceShot > state.weapon.fireGap + 0.08) state.bloom *= Math.exp(-dt * 7);
+    state.feedback = Math.max(0, state.feedback - dt);
     model.position.z = -0.42 + state.kick;
     model.rotation.x = state.kick * 2.2;
+    model.position.y = -0.2 + state.feedback * 0.025;
     scope.visible = state.weapon !== WEAPONS.shotgun;
     flash.visible = state.flash > 0;
     flash.rotation.z = state.flash * 30;
     flashLight.intensity = state.flash > 0 ? 18 : 0;
     if (state.reloadLeft > 0) {
       state.reloadLeft = Math.max(0, state.reloadLeft - dt);
-      model.rotation.x = -0.55 * Math.min(1, (state.weapon.reload - state.reloadLeft) * 2);
+      const progress = 1 - state.reloadLeft / state.reloadDuration;
+      const dip = Math.sin(progress * Math.PI);
+      model.rotation.x = -0.55 * dip;
+      model.position.y = -0.2 - dip * 0.12;
       if (state.reloadLeft === 0) {
         const need = state.weapon.mag - state.mag;
         const take = Math.min(need, state.reserve);
@@ -173,29 +188,33 @@ export function createWeapon(camera, random) {
       return state.mag > 0 && state.cooldown === 0 && state.reloadLeft === 0;
     },
     pullTrigger() {
+      if (state.reloadLeft > 0 || state.cooldown > 0) return;
       state.cooldown = state.weapon.fireGap;
+      state.sinceShot = 0;
       state.flash = 0.06;
-      state.kick = 0.055;
+      state.kick = Math.min(0.12, state.kick + 0.025 + state.weapon.recoil);
+      state.feedback = 0.1; // immediate firing impulse; confirmed hits use main.js's HUD marker
       state.bloom = Math.min(0.06, state.bloom + state.weapon.spreadPerShot);
     },
     takeRound() {
-      if (state.mag <= 0) return false;
+      if (state.mag <= 0 || state.reloadLeft > 0 || state.cooldown > 0) return false;
       state.mag -= 1;
       return true;
     },
     reload() {
       if (state.reloadLeft > 0 || state.mag === state.weapon.mag || state.reserve === 0) return;
-      state.reloadLeft = state.weapon.reload;
+      state.reloadDuration = state.weapon.reload + (state.mag === 0 ? 0.25 : 0);
+      state.reloadLeft = state.reloadDuration;
     },
     // Total cone half-angle for a shot taken right now, from the weapon's base, the movement
     // (speed / top speed) and the firing bloom.
     spread(speed) {
       const w = state.weapon;
-      const move = Math.min(1, speed / 5.2) * w.spreadMoving;
-      return w.spreadStill + w.bloom + move;
+      const move = Math.min(1, Math.max(0, speed) / 5.2) * w.spreadMoving;
+      return w.spreadStill + state.bloom + move;
     },
     recoilKick() {
-      return state.weapon.recoil;
+      return state.weapon.recoil * (1 + state.bloom * 8);
     },
     refill() {
       state.mag = state.weapon.mag;
@@ -205,6 +224,9 @@ export function createWeapon(camera, random) {
       state.flash = 0;
       state.kick = 0;
       state.bloom = 0;
+      state.sinceShot = 10;
+      state.feedback = 0;
+      state.reloadDuration = 0;
     },
   };
 }
