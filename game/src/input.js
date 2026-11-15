@@ -1,13 +1,25 @@
 // Keyboard and mouse, and the pointer lock that turns the mouse into look. Plain browser
 // APIs only: the game asks the canvas for pointer lock and reads movementX/Y while it holds it.
+// It also exposes one-shot key presses (a key going down) so the game can react to B, E, Tab.
 export function createInput(canvas, onLockChange) {
   const keys = new Set();
+  const pressHandlers = new Map();
+  const releaseHandlers = new Map();
   const state = { keys, locked: false, firing: false, lookX: 0, lookY: 0 };
 
   function setKey(event, down) {
-    if (down) keys.add(event.code);
-    else keys.delete(event.code);
-    if (event.code === 'Space') event.preventDefault();
+    if (down) {
+      if (!keys.has(event.code)) {
+        const handlers = pressHandlers.get(event.code);
+        if (handlers) for (const handler of handlers) handler(event);
+      }
+      keys.add(event.code);
+    } else {
+      keys.delete(event.code);
+      const handlers = releaseHandlers.get(event.code);
+      if (handlers) for (const handler of handlers) handler(event);
+    }
+    if (event.code === 'Space' || event.code === 'Tab') event.preventDefault();
   }
 
   window.addEventListener('keydown', (event) => setKey(event, true));
@@ -44,6 +56,19 @@ export function createInput(canvas, onLockChange) {
       state.lookX = 0;
       state.lookY = 0;
       return { x, y };
+    },
+    addKeyPress(code, handler) {
+      const handlers = pressHandlers.get(code) ?? [];
+      handlers.push(handler);
+      pressHandlers.set(code, handlers);
+    },
+    addKeyRelease(code, handler) {
+      const handlers = releaseHandlers.get(code) ?? [];
+      handlers.push(handler);
+      releaseHandlers.set(code, handlers);
+    },
+    walking() {
+      return keys.has('ShiftLeft') || keys.has('ShiftRight');
     },
   };
 }

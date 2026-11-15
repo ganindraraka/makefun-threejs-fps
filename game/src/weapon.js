@@ -1,20 +1,99 @@
-// One hitscan rifle: a view model, a magazine, a reload, and the spread that punishes moving.
-// It owns the numbers; main.js owns the ray and the damage.
+// The arsenal: four weapons with different damage, fire rate, accuracy and price, plus armour.
+// A weapon owns its view model, magazine, reload, and the spread and recoil that grow as the
+// trigger is held and the player moves. main.js owns the ray and the damage.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 
-const MAG_SIZE = 30;
-const RESERVE = 90;
-const FIRE_GAP = 0.096;
-const RELOAD_TIME = 1.9;
-const SPREAD_STILL = 0.0022;
-const SPREAD_MOVING = 0.028;
-const MOVE_REFERENCE = 5.2;
-const MUZZLE_TIME = 0.06;
+// Each weapon: cost, damage at point blank, falloff (damage lost per metre past its range),
+// fire gap in seconds, magazine, reserve, reload seconds, the spread of a single still shot,
+// how fast spread grows per shot, and how much spread a full sprint adds.
+export const WEAPONS = {
+  rifle: {
+    key: 'rifle',
+    name: 'Vanguard AR',
+    cost: 2700,
+    damage: 36,
+    falloff: 0.9,       // damage per metre past `range`
+    range: 18,          // metres before falloff starts
+    minDamage: 14,
+    fireGap: 0.096,     // ~625 rpm
+    mag: 30,
+    reserve: 90,
+    reload: 2.1,
+    spreadStill: 0.0018,
+    spreadPerShot: 0.0016,
+    spreadMoving: 0.030,
+    recoil: 0.0105,
+    armorPen: 0.9,
+    auto: true,
+  },
+  smg: {
+    key: 'smg',
+    name: 'Wasp SMG',
+    cost: 1500,
+    damage: 22,
+    falloff: 1.0,
+    range: 12,
+    minDamage: 10,
+    fireGap: 0.068,     // ~880 rpm
+    mag: 30,
+    reserve: 120,
+    reload: 1.9,
+    spreadStill: 0.0032,
+    spreadPerShot: 0.0019,
+    spreadMoving: 0.022,
+    recoil: 0.0082,
+    armorPen: 0.75,
+    auto: true,
+  },
+  shotgun: {
+    key: 'shotgun',
+    name: 'Breaker 12',
+    cost: 1900,
+    damage: 15,         // per pellet, 8 pellets
+    pellets: 8,
+    falloff: 1.4,
+    range: 8,
+    minDamage: 3,
+    fireGap: 0.82,
+    mag: 6,
+    reserve: 30,
+    reload: 2.6,
+    spreadStill: 0.052,
+    spreadPerShot: 0,
+    spreadMoving: 0.02,
+    recoil: 0.05,
+    armorPen: 0.7,
+    auto: false,
+  },
+  sniper: {
+    key: 'sniper',
+    name: 'Longview DMR',
+    cost: 4200,
+    damage: 95,
+    falloff: 0.2,
+    range: 40,
+    minDamage: 70,
+    fireGap: 0.62,
+    mag: 10,
+    reserve: 40,
+    reload: 2.6,
+    spreadStill: 0.0005,
+    spreadPerShot: 0.010,
+    spreadMoving: 0.055,
+    recoil: 0.028,
+    armorPen: 1.0,
+    auto: false,
+  },
+};
 
-export function createWeapon(camera) {
+export const ARMOR_COST = 650;
+export const ARMOR_VALUE = 100;
+
+export function createWeapon(camera, random) {
   const grip = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.hairline), roughness: 0.7, metalness: 0.2 });
   const body = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.ink), roughness: 0.5, metalness: 0.35 });
+  const dark = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.canvas), roughness: 0.6, metalness: 0.3 });
 
   const model = new THREE.Group();
   const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.42), body);
@@ -22,7 +101,9 @@ export function createWeapon(camera) {
   barrel.position.set(0, 0.025, -0.38);
   const stock = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.08, 0.22), grip);
   stock.position.set(0, -0.02, 0.3);
-  model.add(receiver, barrel, stock);
+  const scope = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.16), dark);
+  scope.position.set(0, 0.085, -0.05);
+  model.add(receiver, barrel, stock, scope);
   model.position.set(0.24, -0.2, -0.42);
   camera.add(model);
 
@@ -38,22 +119,45 @@ export function createWeapon(camera) {
   flashLight.position.set(0.24, -0.16, -0.6);
   camera.add(flashLight);
 
-  const state = { mag: MAG_SIZE, reserve: RESERVE, cooldown: 0, reloadLeft: 0, flash: 0, kick: 0 };
+  const state = {
+    weapon: WEAPONS.rifle,
+    mag: WEAPONS.rifle.mag,
+    reserve: WEAPONS.rifle.reserve,
+    cooldown: 0,
+    reloadLeft: 0,
+    flash: 0,
+    kick: 0,
+    bloom: 0,       // extra spread accumulated from firing
+    armor: 0,
+  };
+
+  function equip(key) {
+    const weapon = WEAPONS[key];
+    if (!weapon) return;
+    state.weapon = weapon;
+    state.mag = weapon.mag;
+    state.reserve = weapon.reserve;
+    state.cooldown = 0;
+    state.reloadLeft = 0;
+    state.bloom = 0;
+  }
 
   function step(dt) {
     state.cooldown = Math.max(0, state.cooldown - dt);
     state.flash = Math.max(0, state.flash - dt);
     state.kick += (0 - state.kick) * Math.min(1, dt * 14);
+    state.bloom = Math.max(0, state.bloom - dt * 0.05);
     model.position.z = -0.42 + state.kick;
     model.rotation.x = state.kick * 2.2;
+    scope.visible = state.weapon !== WEAPONS.shotgun;
     flash.visible = state.flash > 0;
     flash.rotation.z = state.flash * 30;
     flashLight.intensity = state.flash > 0 ? 18 : 0;
     if (state.reloadLeft > 0) {
       state.reloadLeft = Math.max(0, state.reloadLeft - dt);
-      model.rotation.x = -0.55 * Math.min(1, (RELOAD_TIME - state.reloadLeft) * 2);
+      model.rotation.x = -0.55 * Math.min(1, (state.weapon.reload - state.reloadLeft) * 2);
       if (state.reloadLeft === 0) {
-        const need = MAG_SIZE - state.mag;
+        const need = state.weapon.mag - state.mag;
         const take = Math.min(need, state.reserve);
         state.mag += take;
         state.reserve -= take;
@@ -64,13 +168,15 @@ export function createWeapon(camera) {
   return {
     state,
     step,
+    equip,
     ready() {
       return state.mag > 0 && state.cooldown === 0 && state.reloadLeft === 0;
     },
     pullTrigger() {
-      state.cooldown = FIRE_GAP;
-      state.flash = MUZZLE_TIME;
+      state.cooldown = state.weapon.fireGap;
+      state.flash = 0.06;
       state.kick = 0.055;
+      state.bloom = Math.min(0.06, state.bloom + state.weapon.spreadPerShot);
     },
     takeRound() {
       if (state.mag <= 0) return false;
@@ -78,19 +184,33 @@ export function createWeapon(camera) {
       return true;
     },
     reload() {
-      if (state.reloadLeft > 0 || state.mag === MAG_SIZE || state.reserve === 0) return;
-      state.reloadLeft = RELOAD_TIME;
+      if (state.reloadLeft > 0 || state.mag === state.weapon.mag || state.reserve === 0) return;
+      state.reloadLeft = state.weapon.reload;
     },
+    // Total cone half-angle for a shot taken right now, from the weapon's base, the movement
+    // (speed / top speed) and the firing bloom.
     spread(speed) {
-      return SPREAD_STILL + Math.min(1, speed / MOVE_REFERENCE) * SPREAD_MOVING;
+      const w = state.weapon;
+      const move = Math.min(1, speed / 5.2) * w.spreadMoving;
+      return w.spreadStill + w.bloom + move;
+    },
+    recoilKick() {
+      return state.weapon.recoil;
     },
     refill() {
-      state.mag = MAG_SIZE;
-      state.reserve = RESERVE;
+      state.mag = state.weapon.mag;
+      state.reserve = state.weapon.reserve;
       state.cooldown = 0;
       state.reloadLeft = 0;
       state.flash = 0;
       state.kick = 0;
+      state.bloom = 0;
     },
   };
+}
+
+// Damage of `weapon` on a hit `distance` metres away, with a small deterministic spread.
+export function damageAtRange(weapon, distance) {
+  const past = Math.max(0, distance - weapon.range);
+  return Math.max(weapon.minDamage, weapon.damage - past * weapon.falloff);
 }

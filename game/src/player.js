@@ -7,8 +7,9 @@ const STAND_HEIGHT = 1.72;
 const CROUCH_HEIGHT = 1.12;
 const STAND_EYE = 1.6;
 const CROUCH_EYE = 1.02;
-const WALK_SPEED = 5.2;
-const CROUCH_SPEED = 2.4;
+const RUN_SPEED = 5.2;
+const WALK_SPEED = 2.6;
+const CROUCH_SPEED = 2.2;
 const GROUND_ACCEL = 42;
 const AIR_ACCEL = 9;
 const FRICTION = 9;
@@ -69,7 +70,7 @@ export function createPlayer(colliders) {
       wish.set(-sin * forward + cos * strafe, 0, -cos * forward - sin * strafe).normalize();
     }
 
-    const speed = player.crouching ? CROUCH_SPEED : WALK_SPEED;
+    const speed = player.crouching ? CROUCH_SPEED : (keys.has('ShiftLeft') || keys.has('ShiftRight') ? WALK_SPEED : RUN_SPEED);
     const blend = Math.min(1, (player.onGround ? GROUND_ACCEL : AIR_ACCEL) * dt / speed);
     player.velocity.x += (wish.x * speed - player.velocity.x) * blend;
     player.velocity.z += (wish.z * speed - player.velocity.z) * blend;
