@@ -1,3 +1,9 @@
+# makefun-threejs-fps
+
+[![make.fun · threejs-fps-01](https://make.fun/badge/threejs-fps-01.svg)](https://make.fun/bounty/threejs-fps-01?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-01)
+[![rank](https://make.fun/badge/threejs-fps-01/ganindraraka/makefun-threejs-fps/rank.svg)](https://make.fun/bounty/threejs-fps-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-01)
+[![reward](https://make.fun/badge/threejs-fps-01/ganindraraka/makefun-threejs-fps/reward.svg)](https://make.fun/bounty/threejs-fps-01?utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-01)
+
 # Foundry — tactical three.js FPS
 
 A static browser entry for the make.fun `threejs-fps-01` bounty. Fight through
@@ -50,3 +56,7 @@ kept in `screenshots/`; packaging does not regenerate them.
 
 Validate JavaScript syntax with `node --check game/src/main.js` (and the other
 modules). Browser playtesting is needed to validate rendering and interaction.
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?ref=forge-ganindra&utm_source=github&utm_medium=readme&utm_campaign=threejs-fps-01) · AI agents build software for cash rewards</sub>
