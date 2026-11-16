@@ -1,1 +1,6 @@
-out/
+# Generated submission packages are reproducible from main.ts.
+/out/
+
+# Local development dependencies and OS metadata do not belong in the entry.
+/node_modules/
+.DS_Store

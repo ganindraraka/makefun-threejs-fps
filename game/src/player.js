@@ -1,6 +1,6 @@
 // Player movement: acceleration, friction, gravity, crouch and jump, resolved as a box against
 // the world's colliders one axis at a time, so a wall never swallows the player.
-import * as THREE from 'three';
+import * as THREE from "three";
 
 const RADIUS = 0.34;
 const STAND_HEIGHT = 1.72;
@@ -35,13 +35,17 @@ export function createPlayer(colliders) {
   function overlaps(x, y, z, height, lift) {
     probe.min.set(x - RADIUS, y + lift, z - RADIUS);
     probe.max.set(x + RADIUS, y + height - lift, z + RADIUS);
-    for (const collider of colliders) if (probe.intersectsBox(collider)) return collider;
+    for (const collider of colliders)
+      if (probe.intersectsBox(collider)) return collider;
     return null;
   }
 
   function look(dx, dy, sensitivity = 0.0022) {
     player.yaw -= dx * sensitivity;
-    player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - dy * sensitivity));
+    player.pitch = Math.max(
+      -1.45,
+      Math.min(1.45, player.pitch - dy * sensitivity),
+    );
   }
 
   function recoil(pitchKick, yawKick) {
@@ -50,28 +54,48 @@ export function createPlayer(colliders) {
   }
 
   function step(dt, keys) {
-    const crouching = keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyC');
+    const crouching =
+      keys.has("ControlLeft") || keys.has("ControlRight") || keys.has("KeyC");
     if (crouching && !player.crouching) {
       player.crouching = true;
       player.height = CROUCH_HEIGHT;
-    } else if (!crouching && player.crouching && !overlaps(player.position.x, player.position.y, player.position.z, STAND_HEIGHT, 0.02)) {
+    } else if (
+      !crouching &&
+      player.crouching &&
+      !overlaps(
+        player.position.x,
+        player.position.y,
+        player.position.z,
+        STAND_HEIGHT,
+        0.02,
+      )
+    ) {
       player.crouching = false;
       player.height = STAND_HEIGHT;
     }
     const eyeTarget = player.crouching ? CROUCH_EYE : STAND_EYE;
     player.eye += (eyeTarget - player.eye) * Math.min(1, dt * 12);
 
-    const forward = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
-    const strafe = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+    const forward = (keys.has("KeyW") ? 1 : 0) - (keys.has("KeyS") ? 1 : 0);
+    const strafe = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
     wish.set(0, 0, 0);
     if (forward || strafe) {
       const sin = Math.sin(player.yaw);
       const cos = Math.cos(player.yaw);
-      wish.set(-sin * forward + cos * strafe, 0, -cos * forward - sin * strafe).normalize();
+      wish
+        .set(-sin * forward + cos * strafe, 0, -cos * forward - sin * strafe)
+        .normalize();
     }
 
-    const speed = player.crouching ? CROUCH_SPEED : (keys.has('ShiftLeft') || keys.has('ShiftRight') ? WALK_SPEED : RUN_SPEED);
-    const blend = Math.min(1, (player.onGround ? GROUND_ACCEL : AIR_ACCEL) * dt / speed);
+    const speed = player.crouching
+      ? CROUCH_SPEED
+      : keys.has("ShiftLeft") || keys.has("ShiftRight")
+        ? WALK_SPEED
+        : RUN_SPEED;
+    const blend = Math.min(
+      1,
+      ((player.onGround ? GROUND_ACCEL : AIR_ACCEL) * dt) / speed,
+    );
     player.velocity.x += (wish.x * speed - player.velocity.x) * blend;
     player.velocity.z += (wish.z * speed - player.velocity.z) * blend;
     if (player.onGround && !wish.lengthSq()) {
@@ -80,22 +104,46 @@ export function createPlayer(colliders) {
       player.velocity.z *= damp;
     }
 
-    if (keys.has('Space') && player.onGround) {
+    if (keys.has("Space") && player.onGround) {
       player.velocity.y = JUMP_SPEED;
       player.onGround = false;
     }
     player.velocity.y -= GRAVITY * dt;
 
     const nextX = player.position.x + player.velocity.x * dt;
-    if (!overlaps(nextX, player.position.y, player.position.z, player.height, 0.04)) player.position.x = nextX;
+    if (
+      !overlaps(
+        nextX,
+        player.position.y,
+        player.position.z,
+        player.height,
+        0.04,
+      )
+    )
+      player.position.x = nextX;
     else player.velocity.x = 0;
     const nextZ = player.position.z + player.velocity.z * dt;
-    if (!overlaps(player.position.x, player.position.y, nextZ, player.height, 0.04)) player.position.z = nextZ;
+    if (
+      !overlaps(
+        player.position.x,
+        player.position.y,
+        nextZ,
+        player.height,
+        0.04,
+      )
+    )
+      player.position.z = nextZ;
     else player.velocity.z = 0;
 
     player.position.y += player.velocity.y * dt;
     player.onGround = false;
-    const hit = overlaps(player.position.x, player.position.y, player.position.z, player.height, 0);
+    const hit = overlaps(
+      player.position.x,
+      player.position.y,
+      player.position.z,
+      player.height,
+      0,
+    );
     if (hit && player.velocity.y <= 0) {
       player.position.y = hit.max.y;
       player.velocity.y = 0;

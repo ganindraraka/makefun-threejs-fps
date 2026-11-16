@@ -1,8 +1,8 @@
 // The arsenal: four weapons with different damage, fire rate, accuracy and price, plus armour.
 // A weapon owns its view model, magazine, reload, and the spread and recoil that grow as the
 // trigger is held and the player moves. main.js owns the ray and the damage.
-import * as THREE from 'three';
-import { PALETTE } from './palette.js';
+import * as THREE from "three";
+import { PALETTE } from "./palette.js";
 
 // Feel model: every shot has three independent costs. `cooldown` limits cadence,
 // `bloom` makes a sustained trigger less precise, and `kick` moves the view model
@@ -16,33 +16,33 @@ import { PALETTE } from './palette.js';
 // how fast spread grows per shot, and how much spread a full sprint adds.
 export const WEAPONS = {
   rifle: {
-    key: 'rifle',
-    name: 'Vanguard AR',
+    key: "rifle",
+    name: "Vanguard AR",
     cost: 2700,
     damage: 36,
-    falloff: 0.9,       // damage per metre past `range`
-    range: 18,          // metres before falloff starts
+    falloff: 0.9, // damage per metre past `range`
+    range: 18, // metres before falloff starts
     minDamage: 14,
-    fireGap: 0.096,     // ~625 rpm
+    fireGap: 0.096, // ~625 rpm
     mag: 30,
     reserve: 90,
     reload: 2.1,
     spreadStill: 0.0018,
     spreadPerShot: 0.0016,
-    spreadMoving: 0.030,
+    spreadMoving: 0.03,
     recoil: 0.0105,
     armorPen: 0.9,
     auto: true,
   },
   smg: {
-    key: 'smg',
-    name: 'Wasp SMG',
+    key: "smg",
+    name: "Wasp SMG",
     cost: 1500,
     damage: 22,
     falloff: 1.0,
     range: 12,
     minDamage: 10,
-    fireGap: 0.068,     // ~880 rpm
+    fireGap: 0.068, // ~880 rpm
     mag: 30,
     reserve: 120,
     reload: 1.9,
@@ -54,10 +54,10 @@ export const WEAPONS = {
     auto: true,
   },
   shotgun: {
-    key: 'shotgun',
-    name: 'Breaker 12',
+    key: "shotgun",
+    name: "Breaker 12",
     cost: 1900,
-    damage: 15,         // per pellet, 8 pellets
+    damage: 15, // per pellet, 8 pellets
     pellets: 8,
     falloff: 1.4,
     range: 8,
@@ -74,8 +74,8 @@ export const WEAPONS = {
     auto: false,
   },
   sniper: {
-    key: 'sniper',
-    name: 'Longview DMR',
+    key: "sniper",
+    name: "Longview DMR",
     cost: 4200,
     damage: 95,
     falloff: 0.2,
@@ -86,7 +86,7 @@ export const WEAPONS = {
     reserve: 40,
     reload: 2.6,
     spreadStill: 0.0005,
-    spreadPerShot: 0.010,
+    spreadPerShot: 0.01,
     spreadMoving: 0.055,
     recoil: 0.028,
     armorPen: 1.0,
@@ -98,9 +98,21 @@ export const ARMOR_COST = 650;
 export const ARMOR_VALUE = 100;
 
 export function createWeapon(camera, random) {
-  const grip = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.hairline), roughness: 0.7, metalness: 0.2 });
-  const body = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.ink), roughness: 0.5, metalness: 0.35 });
-  const dark = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.canvas), roughness: 0.6, metalness: 0.3 });
+  const grip = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(PALETTE.hairline),
+    roughness: 0.7,
+    metalness: 0.2,
+  });
+  const body = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(PALETTE.ink),
+    roughness: 0.5,
+    metalness: 0.35,
+  });
+  const dark = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(PALETTE.canvas),
+    roughness: 0.6,
+    metalness: 0.3,
+  });
 
   const model = new THREE.Group();
   const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.42), body);
@@ -116,13 +128,23 @@ export function createWeapon(camera, random) {
 
   const flash = new THREE.Mesh(
     new THREE.PlaneGeometry(0.24, 0.24),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.accent), transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(PALETTE.accent),
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
   );
   flash.position.set(0.24, -0.18, -0.95);
   flash.visible = false;
   camera.add(flash);
 
-  const flashLight = new THREE.PointLight(new THREE.Color(PALETTE.accent), 0, 5);
+  const flashLight = new THREE.PointLight(
+    new THREE.Color(PALETTE.accent),
+    0,
+    5,
+  );
   flashLight.position.set(0.24, -0.16, -0.6);
   camera.add(flashLight);
 
@@ -134,7 +156,7 @@ export function createWeapon(camera, random) {
     reloadLeft: 0,
     flash: 0,
     kick: 0,
-    bloom: 0,       // extra spread accumulated from firing
+    bloom: 0, // extra spread accumulated from firing
     sinceShot: 10,
     reloadDuration: 0,
     feedback: 0,
@@ -171,7 +193,8 @@ export function createWeapon(camera, random) {
     state.flash = Math.max(0, state.flash - dt);
     state.kick *= Math.exp(-dt * 14);
     // A short settling delay makes bursts tighter than sustained automatic fire.
-    if (state.sinceShot > state.weapon.fireGap + 0.08) state.bloom *= Math.exp(-dt * 7);
+    if (state.sinceShot > state.weapon.fireGap + 0.08)
+      state.bloom *= Math.exp(-dt * 7);
     state.feedback = Math.max(0, state.feedback - dt);
     state.dryFire = Math.max(0, state.dryFire - dt);
     model.position.z = -0.42 + state.kick;
@@ -219,16 +242,27 @@ export function createWeapon(camera, random) {
       state.feedback = 0.1; // immediate firing impulse; confirmed hits use main.js's HUD marker
       state.bloom = Math.min(0.055, state.bloom + state.weapon.spreadPerShot);
       state.shotCount += 1;
-      state.lastShot = { sequence: state.shotCount, weapon: state.weapon.key, recoil: state.recoilKick(), spread: state.bloom };
+      state.lastShot = {
+        sequence: state.shotCount,
+        weapon: state.weapon.key,
+        recoil: state.recoilKick(),
+        spread: state.bloom,
+      };
       return true;
     },
     takeRound() {
-      if (state.mag <= 0 || state.reloadLeft > 0 || state.cooldown > 0) return false;
+      if (state.mag <= 0 || state.reloadLeft > 0 || state.cooldown > 0)
+        return false;
       state.mag -= 1;
       return true;
     },
     reload() {
-      if (state.reloadLeft > 0 || state.mag === state.weapon.mag || state.reserve === 0) return false;
+      if (
+        state.reloadLeft > 0 ||
+        state.mag === state.weapon.mag ||
+        state.reserve === 0
+      )
+        return false;
       state.reloadDuration = state.weapon.reload + (state.mag === 0 ? 0.25 : 0);
       state.reloadLeft = state.reloadDuration;
       state.reloadCount += 1;
@@ -265,7 +299,10 @@ export function createWeapon(camera, random) {
         name: state.weapon.name,
         ammo: { magazine: state.mag, reserve: state.reserve },
         reloading: state.reloadLeft > 0,
-        reloadProgress: state.reloadDuration > 0 ? 1 - state.reloadLeft / state.reloadDuration : 0,
+        reloadProgress:
+          state.reloadDuration > 0
+            ? 1 - state.reloadLeft / state.reloadDuration
+            : 0,
         spread: state.bloom,
         recoil: state.kick,
         shotCount: state.shotCount,

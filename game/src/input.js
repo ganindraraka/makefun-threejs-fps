@@ -19,28 +19,33 @@ export function createInput(canvas, onLockChange) {
       const handlers = releaseHandlers.get(event.code);
       if (handlers) for (const handler of handlers) handler(event);
     }
-    if (event.code === 'Space' || event.code === 'Tab') event.preventDefault();
+    if (event.code === "Space" || event.code === "Tab") event.preventDefault();
   }
 
-  window.addEventListener('keydown', (event) => setKey(event, true));
-  window.addEventListener('keyup', (event) => setKey(event, false));
-  window.addEventListener('blur', () => keys.clear());
-  window.addEventListener('mousemove', (event) => {
+  window.addEventListener("keydown", (event) => setKey(event, true));
+  window.addEventListener("keyup", (event) => setKey(event, false));
+  function resetHeldInput() {
+    keys.clear();
+    state.firing = false;
+    state.lookX = 0;
+    state.lookY = 0;
+  }
+  window.addEventListener("blur", resetHeldInput);
+  window.addEventListener("mousemove", (event) => {
     if (!state.locked) return;
     state.lookX += event.movementX;
     state.lookY += event.movementY;
   });
-  window.addEventListener('mousedown', (event) => {
+  window.addEventListener("mousedown", (event) => {
     if (state.locked && event.button === 0) state.firing = true;
   });
-  window.addEventListener('mouseup', (event) => {
+  window.addEventListener("mouseup", (event) => {
     if (event.button === 0) state.firing = false;
   });
-  document.addEventListener('pointerlockchange', () => {
+  document.addEventListener("pointerlockchange", () => {
     state.locked = document.pointerLockElement === canvas;
     if (!state.locked) {
-      keys.clear();
-      state.firing = false;
+      resetHeldInput();
     }
     onLockChange(state.locked);
   });
@@ -68,7 +73,7 @@ export function createInput(canvas, onLockChange) {
       releaseHandlers.set(code, handlers);
     },
     walking() {
-      return keys.has('ShiftLeft') || keys.has('ShiftRight');
+      return keys.has("ShiftLeft") || keys.has("ShiftRight");
     },
   };
 }
