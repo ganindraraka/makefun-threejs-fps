@@ -3,6 +3,12 @@
 // simulation; main.js pushes numbers and a buy callback in and reads the play callback out.
 import { WEAPONS, ARMOR_COST } from './weapon.js';
 
+// HUD contract: simulation code pushes state in small, idempotent updates. DOM writes
+// are cached through `set()` so a 60 Hz loop does not recreate text nodes every frame.
+// Transient effects (hit markers, banners and feed lines) own their timers here; the
+// match loop only describes what happened and never needs to know how long it should
+// remain visible.
+
 export function createHud() {
   const get = (id) => document.getElementById(id);
   const overlay = get('overlay');
@@ -45,6 +51,7 @@ export function createHud() {
   let onBuy = null;
   let currentMoney = 0;
   let owned = 'rifle';
+  let objectiveState = '';
 
   function renderBuy(money, currentWeapon, hasArmor) {
     currentMoney = money;
@@ -117,6 +124,31 @@ export function createHud() {
     showObjective(text, on) {
       objectiveHud.innerHTML = text;
       objectiveHud.classList.toggle('on', !!on);
+      objectiveState = on ? text : '';
+    },
+    setObjectivePrompt({ text = '', tone = '', progress = null } = {}) {
+      if (!text) {
+        objectiveHud.classList.remove('on');
+        objectiveState = '';
+        return;
+      }
+      const bar = progress == null ? '' : `<span class="objective-progress"><i style="width:${Math.max(0, Math.min(100, progress * 100))}%"></i></span>`;
+      objectiveHud.innerHTML = `<strong class="${tone}">${text}</strong>${bar}`;
+      objectiveHud.classList.add('on');
+      objectiveState = text;
+    },
+    get objectiveState() { return objectiveState; },
+    setReloadProgress(progress) {
+      ammo.classList.toggle('reloading', progress >= 0 && progress < 1);
+      ammo.style.setProperty('--reload-progress', `${Math.max(0, Math.min(1, progress))}`);
+    },
+    setDamageFeedback(amount, killed = false) {
+      if (amount > 0) {
+        hitmarker.dataset.damage = String(Math.round(amount));
+        hitmarker.classList.add('damage');
+        if (killed) hitmarker.classList.add('kill');
+        setTimeout(() => hitmarker.classList.remove('damage'), 120);
+      }
     },
     pushFeed(html, holdMs = 4200) {
       const line = document.createElement('div');

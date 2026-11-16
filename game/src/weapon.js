@@ -4,6 +4,13 @@
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 
+// Feel model: every shot has three independent costs. `cooldown` limits cadence,
+// `bloom` makes a sustained trigger less precise, and `kick` moves the view model
+// and camera. They decay at different rates so tapping regains accuracy quickly,
+// while the visible kick settles a little later and sells the weight of the gun.
+// Reloading is a transaction at the end of its timer: the magazine never partially
+// refills, which keeps the HUD and the simulation in agreement.
+
 // Each weapon: cost, damage at point blank, falloff (damage lost per metre past its range),
 // fire gap in seconds, magazine, reserve, reload seconds, the spread of a single still shot,
 // how fast spread grows per shot, and how much spread a full sprint adds.
@@ -132,6 +139,10 @@ export function createWeapon(camera, random) {
     reloadDuration: 0,
     feedback: 0,
     armor: 0,
+    shotCount: 0,
+    reloadCount: 0,
+    dryFire: 0,
+    lastShot: null,
   };
 
   function equip(key) {
@@ -147,6 +158,10 @@ export function createWeapon(camera, random) {
     state.flash = 0;
     state.feedback = 0;
     state.sinceShot = 10;
+    state.shotCount = 0;
+    state.reloadCount = 0;
+    state.dryFire = 0;
+    state.lastShot = null;
   }
 
   function step(dt) {
@@ -158,6 +173,7 @@ export function createWeapon(camera, random) {
     // A short settling delay makes bursts tighter than sustained automatic fire.
     if (state.sinceShot > state.weapon.fireGap + 0.08) state.bloom *= Math.exp(-dt * 7);
     state.feedback = Math.max(0, state.feedback - dt);
+    state.dryFire = Math.max(0, state.dryFire - dt);
     model.position.z = -0.42 + state.kick;
     model.rotation.x = state.kick * 2.2;
     model.position.y = -0.2 + state.feedback * 0.025;
@@ -188,13 +204,23 @@ export function createWeapon(camera, random) {
       return state.mag > 0 && state.cooldown === 0 && state.reloadLeft === 0;
     },
     pullTrigger() {
-      if (state.reloadLeft > 0 || state.cooldown > 0) return;
+      if (state.reloadLeft > 0 || state.cooldown > 0) return false;
+      if (state.mag <= 0) {
+        state.dryFire = 0.08;
+        // A dry click has a short lockout, but never inherits the full fire gap;
+        // the player can reload immediately and shoot on the next frame.
+        state.cooldown = Math.min(0.12, state.weapon.fireGap * 0.75);
+        return false;
+      }
       state.cooldown = state.weapon.fireGap;
       state.sinceShot = 0;
       state.flash = 0.06;
       state.kick = Math.min(0.12, state.kick + 0.025 + state.weapon.recoil);
       state.feedback = 0.1; // immediate firing impulse; confirmed hits use main.js's HUD marker
-      state.bloom = Math.min(0.06, state.bloom + state.weapon.spreadPerShot);
+      state.bloom = Math.min(0.055, state.bloom + state.weapon.spreadPerShot);
+      state.shotCount += 1;
+      state.lastShot = { sequence: state.shotCount, weapon: state.weapon.key, recoil: state.recoilKick(), spread: state.bloom };
+      return true;
     },
     takeRound() {
       if (state.mag <= 0 || state.reloadLeft > 0 || state.cooldown > 0) return false;
@@ -202,9 +228,11 @@ export function createWeapon(camera, random) {
       return true;
     },
     reload() {
-      if (state.reloadLeft > 0 || state.mag === state.weapon.mag || state.reserve === 0) return;
+      if (state.reloadLeft > 0 || state.mag === state.weapon.mag || state.reserve === 0) return false;
       state.reloadDuration = state.weapon.reload + (state.mag === 0 ? 0.25 : 0);
       state.reloadLeft = state.reloadDuration;
+      state.reloadCount += 1;
+      return true;
     },
     // Total cone half-angle for a shot taken right now, from the weapon's base, the movement
     // (speed / top speed) and the firing bloom.
@@ -227,6 +255,24 @@ export function createWeapon(camera, random) {
       state.sinceShot = 10;
       state.feedback = 0;
       state.reloadDuration = 0;
+      state.shotCount = 0;
+      state.reloadCount = 0;
+      state.dryFire = 0;
+      state.lastShot = null;
+    },
+    report() {
+      return {
+        name: state.weapon.name,
+        ammo: { magazine: state.mag, reserve: state.reserve },
+        reloading: state.reloadLeft > 0,
+        reloadProgress: state.reloadDuration > 0 ? 1 - state.reloadLeft / state.reloadDuration : 0,
+        spread: state.bloom,
+        recoil: state.kick,
+        shotCount: state.shotCount,
+        reloadCount: state.reloadCount,
+        dryFire: state.dryFire > 0,
+        lastShot: state.lastShot,
+      };
     },
   };
 }

@@ -10,6 +10,33 @@ const SKILL = {
   hard: { reaction: 0.22, spread: 0.012, rest: 0.32, sight: 42 },
 };
 const STATES = new Set(['Idle', 'SeekCover', 'Advance', 'Engage', 'Retreat', 'PlantBomb', 'DefuseBomb', 'Buy']);
+// Tactical labels are separate from animation/action states. A bot can be in
+// `Engage` while its higher-level plan is to trade, hold, or save.
+const TACTICS = Object.freeze({ HOLD: 'hold', PUSH: 'push', TRADE: 'trade', ROTATE: 'rotate', SAVE: 'save' });
+const WEAPON_ORDER = ['rifle', 'smg', 'shotgun', 'sniper'];
+
+// Bot design notes (kept beside the implementation so the source remains useful
+// to a reviewer and to future tuning passes):
+// 1. Perception is conservative. A bot only acquires a target when a segment from
+//    its eye to the enemy eye is clear of every world collider.
+// 2. Memory is short. `lastSeenAt` is used for a 1.5 second investigation window,
+//    after which the bot returns to its objective instead of wall tracking.
+// 3. Action states are intentionally small. Movement, aiming, planting and defusing
+//    each have one owner, which makes interruption behavior predictable.
+// 4. Tactical intent is recomputed from health, ammunition, objective state and sight.
+//    This prevents a bot from getting stuck in an old plan after a teammate dies.
+// 5. Economy choices are visible through `buyDecision`; this is useful for UI and
+//    makes a round feel authored rather than random.
+// 6. Damage is reported in the same place as hit registration, so armor absorption
+//    and kill rewards cannot disagree about what happened.
+// 7. Navigation uses world.path and collision checks at every movement step. A bad
+//    waypoint therefore causes a slow stop, never a teleport through geometry.
+// 8. Cover points are selected by distance plus exposure. The score is deliberately
+//    simple enough to tune by hand while still producing different lanes of play.
+// 9. Burst timing gives every difficulty a readable rhythm: reaction, three shots,
+//    a short rest, then reassessment.
+// 10. The summary method exposes stable, presentation-ready fields without exposing
+//     mutable vector internals to the HUD.
 
 // main.js owns objective progress and damage to the player; bots own positioning and shots.
 export function createBots(scene, world, random) {
@@ -24,8 +51,10 @@ export function createBots(scene, world, random) {
     Object.assign(bot, { state, stateAge: 0, path: [], pathAt: 0, goal: null });
   }
   function buy(bot) {
-    if (!bot.survived) {
-      const key = bot.money >= WEAPONS.rifle.cost + ARMOR_COST ? 'rifle' : 'smg';
+    const fullBuy = bot.money >= WEAPONS.rifle.cost + ARMOR_COST;
+    if (!bot.survived || bot.money < (bot.weapon?.cost ?? 0) * 0.45) {
+      const preferred = fullBuy ? 'rifle' : (bot.money >= WEAPONS.smg.cost ? 'smg' : 'shotgun');
+      const key = WEAPON_ORDER.includes(preferred) ? preferred : 'smg';
       if (bot.money >= WEAPONS[key].cost) {
         bot.weapon = WEAPONS[key];
         bot.money -= bot.weapon.cost;
@@ -37,7 +66,7 @@ export function createBots(scene, world, random) {
     }
     bot.mag = bot.weapon.mag;
     bot.reserve = bot.weapon.reserve;
-    bot.buyDecision = { weapon: bot.weapon.key, armor: bot.armor, remaining: bot.money };
+    bot.buyDecision = { weapon: bot.weapon.key, armor: bot.armor, remaining: bot.money, fullBuy, label: fullBuy ? 'FULL BUY' : (bot.money >= WEAPONS.smg.cost ? 'FORCE BUY' : 'SAVE') };
   }
   function addBot({ name, team, index = 0, difficulty = 'normal' }) {
     const group = new THREE.Group();
@@ -60,6 +89,8 @@ export function createBots(scene, world, random) {
       money: 800, weapon: WEAPONS.smg, armor: 0, alive: false,
       kills: 0, deaths: 0, state: 'Idle', aimScatter: 0.85 + random() * 0.3,
       stepPhase: random() * Math.PI * 2,
+      tactic: TACTICS.HOLD, decision: 'spawned', radioTimer: 0,
+      shotsFired: 0, shotsHit: 0, damageDone: 0,
     };
     torso.userData = { bot, part: 'torso' };
     head.userData = { bot, part: 'head' };
@@ -82,6 +113,9 @@ export function createBots(scene, world, random) {
       path: [], pathAt: 0, goal: null, repathLeft: 0, cover: null,
       lastSeenAt: -Infinity, hasBomb: false, defusing: false, stateAge: 0,
       yaw: bot.team === 'ally' ? Math.PI : 0,
+      tactic: bot.team === 'ally' ? TACTICS.TRADE : TACTICS.HOLD,
+      decision: 'buying loadout', radioTimer: random() * 2,
+      shotsFired: 0, shotsHit: 0, damageDone: 0,
     });
     transition(bot, 'Buy');
     buy(bot);
@@ -190,11 +224,19 @@ export function createBots(scene, world, random) {
     origin.addScaledVector(dir, 0.55); // clear the shooter's own hit meshes
     const hit = ctx.trace(origin, dir, distance + 2);
     bot.mag -= 1;
+    bot.shotsFired += 1;
     bot.fireCooldown = bot.weapon.fireGap * 1.35;
     ctx.onBotShot?.(bot, origin, dir);
     const amount = damageAtRange(bot.weapon, hit?.distance ?? distance);
-    if (hit?.bot && hit.bot.team !== bot.team) damage(hit.bot, amount * (hit.part === 'head' ? 2.4 : 1), hit.part, bot);
-    else if (hit?.player && bot.team === 'hostile') ctx.onBotHitPlayer?.(amount, bot);
+    if (hit?.bot && hit.bot.team !== bot.team) {
+      bot.shotsHit += 1;
+      const result = damage(hit.bot, amount * (hit.part === 'head' ? 2.4 : 1), hit.part, bot);
+      bot.damageDone += result.dealt;
+    } else if (hit?.player && bot.team === 'hostile') {
+      bot.shotsHit += 1;
+      bot.damageDone += amount;
+      ctx.onBotHitPlayer?.(amount, bot);
+    }
     if (--bot.burstLeft <= 0) { bot.burstLeft = 3; bot.burstRest = bot.skill.rest * (0.8 + random() * 0.4); }
   }
   function step(dt, ctx) {
@@ -206,6 +248,7 @@ export function createBots(scene, world, random) {
         continue;
       }
       bot.stateAge += dt;
+      bot.radioTimer = Math.max(0, bot.radioTimer - dt);
       for (const timer of ['fireCooldown', 'burstRest', 'reactionLeft']) bot[timer] = Math.max(0, bot[timer] - dt);
       if (bot.reloadLeft > 0) {
         bot.reloadLeft = Math.max(0, bot.reloadLeft - dt);
@@ -230,12 +273,20 @@ export function createBots(scene, world, random) {
       const goal = armed ? ctx.bomb.position : ctx.plantSpot(bot);
       const near = Math.hypot(bot.position.x - goal.x, bot.position.z - goal.z);
       bot.defusing = false;
+      if (armed) bot.tactic = bot.team === 'hostile' ? TACTICS.ROTATE : TACTICS.HOLD;
+      else if (bot.hasBomb) bot.tactic = TACTICS.PUSH;
+      else if (bot.health < 32 || (bot.money < WEAPONS.smg.cost && bot.mag < 5)) bot.tactic = TACTICS.SAVE;
+      else if (seen) bot.tactic = TACTICS.TRADE;
+      else bot.tactic = bot.team === 'hostile' ? TACTICS.HOLD : TACTICS.PUSH;
       if (bot.state === 'Buy') transition(bot, 'Advance');
       if (armed && bot.team === 'hostile') transition(bot, 'DefuseBomb');
       else if (bot.hasBomb && !armed && near < 1.1) transition(bot, 'PlantBomb');
-      else if (seen && (bot.health < 30 || bot.reloadLeft > 0)) {
-        if (bot.state !== 'Retreat') { bot.cover = pickCover(bot); transition(bot, 'Retreat'); }
-      } else if (seen) transition(bot, 'Engage');
+      else if (seen && (bot.health < 30 || bot.reloadLeft > 0 || (bot.tactic === TACTICS.SAVE && bot.stateAge > 0.4))) {
+        if (bot.state !== 'Retreat') { bot.cover = pickCover(bot); bot.decision = 'falling back to cover'; transition(bot, 'Retreat'); }
+      } else if (seen) {
+        bot.decision = 'holding angle';
+        transition(bot, 'Engage');
+      }
       else if (bot.state === 'Retreat' && bot.stateAge < 2 && bot.cover) { /* reach safety */ }
       // Defenders hold a perimeter; carriers must reach the actual plant point.
       else if (near > (bot.team === 'hostile' ? 5 : 1.1) && !armed) transition(bot, 'Advance');
@@ -243,14 +294,20 @@ export function createBots(scene, world, random) {
       else if (bot.state !== 'SeekCover') transition(bot, 'Idle');
       switch (bot.state) {
         case 'Advance':
+          bot.decision = bot.hasBomb ? 'carrying objective' : 'advancing through lane';
           // Briefly investigate the last sighting instead of tracking enemies through walls.
           navigate(bot, !bot.hasBomb && ctx.time - bot.lastSeenAt < 1.5 ? bot.lastSeen : goal, dt);
           break;
         case 'SeekCover':
-        case 'Retreat': if (!bot.cover || navigate(bot, bot.cover.pos, dt)) transition(bot, 'Idle'); break;
-        case 'Engage': engage(bot, seen, ctx); break;
-        case 'DefuseBomb': if (near > 0.85) navigate(bot, goal, dt); else bot.defusing = true; break;
-        case 'PlantBomb': break; // main.js advances objective timers while stationary
+        case 'Retreat':
+          if (!bot.cover || navigate(bot, bot.cover.pos, dt)) {
+            bot.decision = 'resetting behind cover';
+            transition(bot, 'Idle');
+          }
+          break;
+        case 'Engage': if (seen) engage(bot, seen, ctx); else transition(bot, 'SeekCover'); break;
+        case 'DefuseBomb': if (near > 0.85) navigate(bot, goal, dt); else { bot.decision = 'defusing C4'; bot.defusing = true; } break;
+        case 'PlantBomb': bot.decision = 'planting at site A'; break; // main.js advances objective timers while stationary
         case 'Idle': bot.yaw += dt * Math.sin(ctx.time + bot.stepPhase) * 0.5; break;
         case 'Buy': break;
       }
@@ -258,5 +315,16 @@ export function createBots(scene, world, random) {
       bot.parts.group.rotation.set(0, bot.yaw, 0);
     }
   }
-  return { bots, hitMeshes, addBot, resetBot, step, damage, aliveOn, canSee, lineClear, pickCover, EYE };
+  return {
+    bots, hitMeshes, addBot, resetBot, step, damage, aliveOn, canSee, lineClear, pickCover, EYE,
+    tactics: TACTICS,
+    summary() {
+      return bots.map((bot) => ({
+        name: bot.name, team: bot.team, state: bot.state, tactic: bot.tactic,
+        decision: bot.decision, alive: bot.alive, health: Math.max(0, bot.health),
+        armor: bot.armor, weapon: bot.weapon.key, ammo: `${bot.mag}/${bot.reserve}`,
+        accuracy: bot.shotsFired ? bot.shotsHit / bot.shotsFired : 0,
+      }));
+    },
+  };
 }
